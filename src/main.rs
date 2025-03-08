@@ -1,4 +1,5 @@
 mod config;
+mod middleware;
 mod router;
 mod server;
 mod https_server;
@@ -30,4 +31,3 @@ async fn main() {
         server::run_http(&cfg.http_addr, cfg.clone()).await;
     }
 }
-// __proto__

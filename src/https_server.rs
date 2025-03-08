@@ -11,6 +11,9 @@ use std::fs;
 use crate::Config;
 use crate::router::handle_request;
 use rcgen::generate_simple_self_signed;
+use std::time::Instant;
+use std::net::SocketAddr;
+use crate::middleware::check_rate_limit;
 
 fn load_certs(path: &str) -> Vec<Certificate> {
     let certfile = File::open(path).unwrap();
@@ -34,14 +37,24 @@ fn generate_self_signed(cert_path: &str, key_path: &str) {
     fs::write(key_path, key_pem).unwrap();
 }
 
-async fn handle(req: Request<Body>, config: Config) -> Result<Response<Body>, hyper::Error> {
-    handle_request(req, config).await
+async fn log_handle(req: Request<Body>, config: Config, remote: SocketAddr) -> Result<Response<Body>, hyper::Error> {
+    if !check_rate_limit(remote) {
+        return Ok(Response::builder().status(429).body(Body::from("Too Many Requests")).unwrap());
+    }
+    let start = Instant::now();
+    let method = req.method().clone();
+    let uri = req.uri().clone();
+    let resp = handle_request(req, config).await;
+    let elapsed = start.elapsed();
+    match &resp {
+        Ok(response) => println!("{} {} {} {}ms [{}]", method, uri, response.status(), elapsed.as_millis(), remote),
+        Err(_) => println!("{} {} ERROR {}ms [{}]", method, uri, elapsed.as_millis(), remote),
+    }
+    resp
 }
 
 pub async fn run_https(addr: &str, cert_path: &str, key_path: &str, config: Config) {
-    if !Path::new(cert_path).exists() || !Path::new(key_path).exists() {
-        generate_self_signed(cert_path, key_path);
-    }
+    if !Path::new(cert_path).exists() || !Path::new(key_path).exists() { generate_self_signed(cert_path, key_path); }
     let certs = load_certs(cert_path);
     let mut keys = load_keys(key_path);
     let server_config = ServerConfig::builder().with_safe_defaults().with_no_client_auth().with_single_cert(certs, keys.remove(0)).unwrap();
@@ -51,14 +64,14 @@ pub async fn run_https(addr: &str, cert_path: &str, key_path: &str, config: Conf
     let acceptor = TlsAcceptor::from(server_config);
     let listener = TcpListener::bind(addr).await.unwrap();
     loop {
-        let (stream, _) = listener.accept().await.unwrap();
+        let (stream, peer_addr) = listener.accept().await.unwrap();
         let acceptor = acceptor.clone();
         let config = config.clone();
         tokio::spawn(async move {
             let tls_stream = acceptor.accept(stream).await.unwrap();
             let service = service_fn(move |req| {
                 let config = config.clone();
-                handle(req, config)
+                log_handle(req, config, peer_addr)
             });
             if let Err(e) = Http::new().serve_connection(tls_stream, service).await {
                 eprintln!("HTTPS connection error: {}", e);
@@ -66,4 +79,3 @@ pub async fn run_https(addr: &str, cert_path: &str, key_path: &str, config: Conf
         });
     }
 }
-// __proto__

@@ -146,11 +146,7 @@ routes = [
         let static_dir_raw = server.static_dir.unwrap_or_else(|| "public".to_string());
         let static_dir = {
             let p = PathBuf::from(static_dir_raw);
-            if p.is_absolute() {
-                p
-            } else {
-                std::env::current_dir().unwrap().join(p)
-            }
+            if p.is_absolute() { p } else { std::env::current_dir().unwrap().join(p) }
         }
         .to_string_lossy()
         .to_string();
@@ -180,13 +176,8 @@ routes = [
     }
     pub fn setup(&self) {
         if let Some(parent) = Path::new(&self.cert_path).parent() {
-            if !parent.exists() {
-                fs::create_dir_all(parent).unwrap();
-            }
+            if !parent.exists() { fs::create_dir_all(parent).unwrap(); }
         }
-        if !Path::new(&self.static_dir).exists() {
-            fs::create_dir_all(&self.static_dir).unwrap();
-        }
+        if !Path::new(&self.static_dir).exists() { fs::create_dir_all(&self.static_dir).unwrap(); }
     }
 }
-// __proto__
